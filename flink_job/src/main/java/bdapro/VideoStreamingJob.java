@@ -18,28 +18,19 @@
 
 package bdapro;
 
-import org.apache.flink.api.common.functions.AggregateFunction;
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.*;
 
-import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.tuple.Tuple4;
-import org.apache.flink.api.java.tuple.Tuple5;
+import org.apache.flink.api.java.tuple.*;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.streaming.api.functions.sink.SinkFunction;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
-import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011;
 import org.apache.flink.util.Collector;
 
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.Properties;
 
@@ -61,20 +52,22 @@ public class VideoStreamingJob {
 //        env.readTextFile("PATH_TO_FILE");
 
         stream.map(new InitialMapStringToEventTuple())
-//                .keyBy(1)//video ID
-//                .countWindow(1000000)
-                .countWindowAll(100000000)
-                .aggregate(new AdvertisementCategoryAggregator())
-                .flatMap(new CategoryTokenizer())
-//                .keyBy(1)
-//                .countWindow(80)
-                .countWindowAll(1)
-                .reduce(new CategoryReducer())
-                .map(new MapFunction<Tuple4<Long, String, Float, Integer>, Tuple4<Long, String, Float, Integer>>() {
+                .keyBy(1)//video ID
+                .countWindow(1000000)
+                .process(new AvgProcessWindowFunction())
+                .filter(new FilterFunction<Tuple5<Long, String, String, Float, Integer>>() {
                     @Override
-                    public Tuple4<Long, String, Float, Integer> map(Tuple4<Long, String, Float, Integer> a) throws Exception {
-                        a.setField(new Date().getTime() - a.f0, 0);
-                        return a;
+                    public boolean filter(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
+                        return (a.f3/a.f4) < 0.05;
+                    }
+                })
+                .keyBy(2)
+                .countWindow(10)
+                .reduce(new CategoryReducer())
+                .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple3<Long, String, Float>>() {
+                    @Override
+                    public Tuple3<Long, String, Float> map(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
+                        return new Tuple3<>(a.f0, a.f2, a.f3/a.f4);
                     }
                 })
                 .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
@@ -100,6 +93,38 @@ public class VideoStreamingJob {
             Long l = d.longValue();
             return new Tuple5<Long, String, String, String, Float>(l, eventAttributes[1], eventAttributes[2], eventAttributes[3], watchedPercentage);
         }
+    }
+
+    private static class AvgProcessWindowFunction extends ProcessWindowFunction<Tuple5<Long, String, String, String, Float>, Tuple5<Long, String, String, Float, Integer>, Tuple, GlobalWindow> {
+
+
+        @Override
+        public void process(Tuple key, Context context, Iterable<Tuple5<Long, String, String, String, Float>> inputs, Collector<Tuple5<Long, String, String, Float, Integer>> collector) throws Exception {
+            int count = 0;
+            float sum = 0;
+            long maxTimeStamp = 0;
+            String category = "";
+            String adID = "";
+            for (Tuple5<Long, String, String, String, Float> in: inputs) {
+                category = in.f2;
+                adID = in.f1;
+                boolean isClicked = in.f4.equals(-1f);
+                count++;
+                if(isClicked){
+                    sum += 10;
+                }else {
+                    sum += in.f4;
+                }
+
+                if(maxTimeStamp<in.f0){
+                    maxTimeStamp = in.f0;
+                }
+
+            }
+            collector.collect(new Tuple5<Long, String, String, Float, Integer>(maxTimeStamp, adID, category, sum, count));
+        }
+
+
     }
 
     static class AdvertisementCategoryAggregator implements AggregateFunction<Tuple5<Long, String, String, String, Float>, CustomAcc, CustomAcc> {
@@ -149,12 +174,12 @@ public class VideoStreamingJob {
         }
     }
 
-    public static class CategoryReducer implements ReduceFunction<Tuple4<Long,String, Float, Integer>>{
+    public static class CategoryReducer implements ReduceFunction<Tuple5<Long, String, String, Float, Integer>>{
 
         @Override
-        public Tuple4<Long,String, Float, Integer> reduce(Tuple4<Long,String, Float, Integer> a, Tuple4<Long,String, Float, Integer> b) throws Exception {
+        public Tuple5<Long, String, String, Float, Integer> reduce(Tuple5<Long, String, String, Float, Integer> a, Tuple5<Long, String, String, Float, Integer> b) throws Exception {
             long largestTimestamp = a.f0 >= b.f0 ? a.f0 : b.f0;
-            return new Tuple4(largestTimestamp,a.f1,a.f2+b.f2,a.f3+b.f3);
+            return new Tuple5<Long, String, String, Float, Integer>(largestTimestamp, a.f1,a.f2,a.f3+b.f3,a.f4+b.f4);
         }
     }
 }
