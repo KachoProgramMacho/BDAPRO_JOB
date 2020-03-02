@@ -27,7 +27,10 @@ import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011;
 import org.apache.flink.util.Collector;
 
@@ -43,7 +46,7 @@ public class VideoStreamingJob {
         properties.setProperty("bootstrap.servers", "cloud-30:9092");
         properties.setProperty("zookeeper.connect", "cloud-12:2181");
         properties.setProperty("group.id", "demoGROUPID");
-        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        env.setStreamTimeCharacteristic(TimeCharacteristic.IngestionTime);
         DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest());
 
 
@@ -52,17 +55,20 @@ public class VideoStreamingJob {
 //        env.readTextFile("PATH_TO_FILE");
 
         stream.map(new InitialMapStringToEventTuple())
-                .keyBy(1)//video ID
+                .keyBy(1)
+                //video ID
                 .countWindow(1000000)
+                //.window(TumblingProcessingTimeWindows.of(Time.seconds(30)))
+                //timeWindow(Time.days(1))
                 .process(new AvgProcessWindowFunction())
                 .filter(new FilterFunction<Tuple5<Long, String, String, Float, Integer>>() {
                     @Override
                     public boolean filter(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
-                        return (a.f3/a.f4) < 0.05;
+                        return (a.f3/a.f4) > 0.05;
                     }
                 })
                 .keyBy(2)
-                .countWindow(10)
+                .countWindow(1)
                 .reduce(new CategoryReducer())
                 .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple3<Long, String, Float>>() {
                     @Override
@@ -71,6 +77,7 @@ public class VideoStreamingJob {
                     }
                 })
                 .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
+                //.writeAsText("ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
 
 //        stream.writeAsText("SLIPKNOT.csv");
         env.execute();
