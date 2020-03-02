@@ -21,7 +21,7 @@ public class SimpleSocket {
         String click = "11,22,ELECTRONICS,44\n";
         //create the socket server object
         Long.parseLong("11");
-        server = new ServerSocket(7777);
+        server = new ServerSocket(      7777);
         //keep listens indefinitely until receives 'exit' call or program terminates
         System.out.println("Waiting for the client request");
         //creating socket and waiting for client connection

@@ -1,3 +1,8 @@
+bdapro/CustomAcc.class
+bdapro/VideoStreamingJob$1.class
+bdapro/VideoStreamingJob$CategoryTokenizer.class
+bdapro/VideoStreamingJob$InitialMapStringToEventTuple.class
 bdapro/VideoStreamingJob$AdvertisementCategoryAggregator.class
 bdapro/VideoStreamingJob.class
-bdapro/VideoStreamingJob$InitialMapStringToEventTuple.class
+bdapro/SimpleSocket.class
+bdapro/VideoStreamingJob$CategoryReducer.class

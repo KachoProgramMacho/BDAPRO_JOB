@@ -17,18 +17,30 @@
  */
 
 package bdapro;
-import org.apache.flink.streaming.connectors.kafka;
+
 import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.MapFunction;
 
+import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.tuple.Tuple5;
 import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011;
+import org.apache.flink.util.Collector;
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.Properties;
 
 public class VideoStreamingJob {
@@ -37,26 +49,40 @@ public class VideoStreamingJob {
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", "localhost:9092");
-        properties.setProperty("zookeeper.connect", "localhost:2181");
-        properties.setProperty("group.id", "test");
-        DataStream<String> stream = env
-                .addSource(new <>("topic", new SimpleStringSchema(), properties));
+        properties.setProperty("bootstrap.servers", "cloud-30:9092");
+        properties.setProperty("zookeeper.connect", "cloud-12:2181");
+        properties.setProperty("group.id", "demoGROUPID");
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest());
 
 
-        DataStream<String> videoEvents = env.socketTextStream("localhost", 7777, "\n");
+//        DataStream<String> videoEvents = env.socketTextStream("localhost", 7777, "\n");
 
-        //env.readTextFile("PATH_TO_FILE");
+//        env.readTextFile("PATH_TO_FILE");
 
-        videoEvents.map(new InitialMapStringToEventTuple())
-                .keyBy(1)//video ID
-                .countWindow(100)
+        stream.map(new InitialMapStringToEventTuple())
+//                .keyBy(1)//video ID
+//                .countWindow(1000000)
+                .countWindowAll(100000000)
                 .aggregate(new AdvertisementCategoryAggregator())
-                .writeAsText("ABOUTBOYKO.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
+                .flatMap(new CategoryTokenizer())
+//                .keyBy(1)
+//                .countWindow(80)
+                .countWindowAll(1)
+                .reduce(new CategoryReducer())
+                .map(new MapFunction<Tuple4<Long, String, Float, Integer>, Tuple4<Long, String, Float, Integer>>() {
+                    @Override
+                    public Tuple4<Long, String, Float, Integer> map(Tuple4<Long, String, Float, Integer> a) throws Exception {
+                        a.setField(new Date().getTime() - a.f0, 0);
+                        return a;
+                    }
+                })
+                .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
 
-
+//        stream.writeAsText("SLIPKNOT.csv");
         env.execute();
     }
+
 
 
     static class InitialMapStringToEventTuple implements MapFunction<String, Tuple5<Long, String, String, String, Float>> {
@@ -65,6 +91,8 @@ public class VideoStreamingJob {
         public Tuple5<Long, String, String, String, Float> map(String s) throws Exception {
             String[] eventAttributes = s.split(",");
             Float watchedPercentage = -1f;
+
+            //Check if watched or clicked event
             if (eventAttributes.length > 4) {
                 watchedPercentage = Float.parseFloat(eventAttributes[4]);
             }
@@ -74,56 +102,59 @@ public class VideoStreamingJob {
         }
     }
 
-    static class AdvertisementCategoryAggregator implements AggregateFunction<Tuple5<Long, String, String, String, Float>, Tuple4<Integer, Integer, Integer, Integer>, Tuple2<Integer, Integer>> {
-
-        public static final String ANSI_RESET = "\u001B[0m";
-        public static final String ANSI_RED = "\u001B[31m";
-
-        @Override
-        public Tuple4<Integer, Integer, Integer, Integer> createAccumulator() {
-            return new Tuple4<Integer, Integer, Integer, Integer>(0, 0, 0, 0);
+    static class AdvertisementCategoryAggregator implements AggregateFunction<Tuple5<Long, String, String, String, Float>, CustomAcc, CustomAcc> {
+         @Override
+        public CustomAcc createAccumulator() {
+            return new CustomAcc();
         }
 
         @Override
-        public Tuple4<Integer, Integer, Integer, Integer> add(Tuple5<Long, String, String, String, Float> event, Tuple4<Integer, Integer, Integer, Integer> acc) {
+        public CustomAcc add(Tuple5<Long, String, String, String, Float> event, CustomAcc acc) {
             boolean isClicked = event.f4.equals(-1f);
             Integer eventValue = Math.round(event.f4 * 5);
             if (isClicked) {
                 eventValue = 10;
             }
 
-            switch (event.f2) {
-                case "FOOD":
-                    acc.setField(acc.f0 + eventValue, 0);
-                    acc.setField(acc.f1 + 1, 1);
-                    break;
-                case "ELECTRONICS":
-                    acc.setField(acc.f2 + eventValue, 2);
-                    acc.setField(acc.f3 + 1, 3);
-                    break;
-                default:
-                    System.out.println(ANSI_RED + "Wrong advertisement category: " + event.f2 + ANSI_RESET);
-                    break;
+            acc.aggregateEvent(event.f2,eventValue);
+
+            // Store the latest timestamp in the accumlator tuple`
+            if(acc.timestamp < event.f0){
+                acc.timestamp = event.f0;
             }
             return acc;
         }
 
         @Override
-        public Tuple2<Integer, Integer> getResult(Tuple4<Integer, Integer, Integer, Integer> acc) {
-            Integer category1 = 0;
-            Integer category2 = 0;
-            if (acc.f1 != 0) {
-                category1 = acc.f0 / acc.f1;
-            }
-            if (acc.f3 != 0) {
-                category2 = acc.f2 / acc.f3;
-            }
-            return new Tuple2<>(category1, category2);
+        public CustomAcc getResult(CustomAcc acc) {
+            return acc;
         }
 
         @Override
-        public Tuple4<Integer, Integer, Integer, Integer> merge(Tuple4<Integer, Integer, Integer, Integer> acc1, Tuple4<Integer, Integer, Integer, Integer> acc2) {
-            return new Tuple4<Integer, Integer, Integer, Integer>(acc1.f0 + acc2.f0, acc1.f1 + acc2.f1, acc1.f2 + acc2.f2, acc1.f3 + acc2.f3);
+        public CustomAcc merge(CustomAcc acc1, CustomAcc acc2) {
+            acc1.mergeWithAcc(acc2);
+            return acc1;
+        }
+    }
+
+    public static class CategoryTokenizer implements FlatMapFunction<CustomAcc,Tuple4<Long,String, Float, Integer>>{
+
+        @Override
+        public void flatMap(CustomAcc acc, Collector<Tuple4<Long, String, Float, Integer>> collector) throws Exception {
+            for(String category: acc.categories){
+                int categoryIndex = acc.categories.indexOf(category);
+                Tuple4<Long,String,Float, Integer> outputTuple = new Tuple4<Long,String, Float, Integer>(acc.timestamp,category, acc.sums.get(categoryIndex),acc.counts.get(categoryIndex));
+                collector.collect(outputTuple);
+            }
+        }
+    }
+
+    public static class CategoryReducer implements ReduceFunction<Tuple4<Long,String, Float, Integer>>{
+
+        @Override
+        public Tuple4<Long,String, Float, Integer> reduce(Tuple4<Long,String, Float, Integer> a, Tuple4<Long,String, Float, Integer> b) throws Exception {
+            long largestTimestamp = a.f0 >= b.f0 ? a.f0 : b.f0;
+            return new Tuple4(largestTimestamp,a.f1,a.f2+b.f2,a.f3+b.f3);
         }
     }
 }
