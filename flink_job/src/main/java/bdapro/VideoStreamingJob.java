@@ -46,36 +46,36 @@ public class VideoStreamingJob {
         properties.setProperty("bootstrap.servers", "cloud-30:9092");
         properties.setProperty("zookeeper.connect", "cloud-12:2181");
         properties.setProperty("group.id", "demoGROUPID");
-        env.setStreamTimeCharacteristic(TimeCharacteristic.IngestionTime);
-        DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest());
+        env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
+        DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest()).setParallelism(16);
 
 
 //        DataStream<String> videoEvents = env.socketTextStream("localhost", 7777, "\n");
 
 //        env.readTextFile("PATH_TO_FILE");
 
-        stream.map(new InitialMapStringToEventTuple())
+        stream.map(new InitialMapStringToEventTuple()).setParallelism(64)
                 .keyBy(1)
                 //video ID
                 .countWindow(1000000)
                 //.window(TumblingProcessingTimeWindows.of(Time.seconds(30)))
                 //timeWindow(Time.days(1))
-                .process(new AvgProcessWindowFunction())
+                .process(new AvgProcessWindowFunction()).setParallelism(64)
                 .filter(new FilterFunction<Tuple5<Long, String, String, Float, Integer>>() {
                     @Override
                     public boolean filter(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
                         return (a.f3/a.f4) > 0.05;
                     }
-                })
+                }).setParallelism(64)
                 .keyBy(2)
-                .countWindow(1)
-                .reduce(new CategoryReducer())
+                .window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
+                .reduce(new CategoryReducer()).setParallelism(64)
                 .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple3<Long, String, Float>>() {
                     @Override
                     public Tuple3<Long, String, Float> map(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
                         return new Tuple3<>(a.f0, a.f2, a.f3/a.f4);
                     }
-                })
+                }).setParallelism(64)
                 .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
                 //.writeAsText("ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
 
