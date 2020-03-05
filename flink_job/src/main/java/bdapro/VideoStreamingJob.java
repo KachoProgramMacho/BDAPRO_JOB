@@ -34,6 +34,9 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011;
 import org.apache.flink.util.Collector;
 
+import java.sql.Timestamp;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Properties;
 
@@ -66,14 +69,19 @@ public class VideoStreamingJob {
                     public boolean filter(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
                         return (a.f3/a.f4) > 0.05;
                     }
-                }).setParallelism(64)
-                .keyBy(2)
-                .window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
-                .reduce(new CategoryReducer()).setParallelism(64)
-                .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple3<Long, String, Float>>() {
+                })
+                .setParallelism(64)
+//                .keyBy(2)
+//                //.window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
+//                .reduce(new CategoryReducer()).setParallelism(64)
+                .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple4<Long, String, Float,String>>() {
                     @Override
-                    public Tuple3<Long, String, Float> map(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
-                        return new Tuple3<>(a.f0, a.f2, a.f3/a.f4);
+                    public Tuple4<Long, String, Float,String> map(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
+                        Timestamp stamp = new Timestamp(System.currentTimeMillis());
+                        Date date = new Date(stamp.getTime());
+                        DateFormat f = new SimpleDateFormat("HH:mm:ss");
+                        String d = f.format(date);
+                        return new Tuple4<>(System.currentTimeMillis()-a.f0, a.f2, a.f3/a.f4,d);
                     }
                 }).setParallelism(64)
                 .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
