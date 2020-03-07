@@ -30,7 +30,7 @@ under the License.
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<flink.version>1.6-SNAPSHOT</flink.version>
+		<flink.version>1.6.0</flink.version>
 		<java.version>1.8</java.version>
 		<kafka.version>0.11</kafka.version>
 		<scala.binary.version>2.11</scala.binary.version>
@@ -110,6 +110,12 @@ under the License.
 			<artifactId>log4j</artifactId>
 			<version>1.2.17</version>
 			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-statebackend-rocksdb_2.11</artifactId>
+			<version>1.6.0</version>
+			<scope>provided</scope>
 		</dependency>
 	</dependencies>
 

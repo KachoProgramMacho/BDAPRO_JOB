@@ -22,6 +22,7 @@ import org.apache.flink.api.common.functions.*;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.*;
+import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -50,6 +51,8 @@ public class VideoStreamingJob {
         properties.setProperty("zookeeper.connect", "cloud-12:2181");
         properties.setProperty("group.id", "demoGROUPID");
         env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
+        env.setStateBackend(new RocksDBStateBackend("hdfs://cloud-11:44000/user/denis/flink/", true));
+        env.getCheckpointConfig().setCheckpointInterval(60000);
         DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest()).setParallelism(16);
 
 
@@ -57,7 +60,7 @@ public class VideoStreamingJob {
 
 //        env.readTextFile("PATH_TO_FILE");
 
-        stream.map(new InitialMapStringToEventTuple()).setParallelism(64)
+        stream.map(new InitialMapStringToEventTuple()).setParallelism(16)
                 .keyBy(1)
                 //video ID
                 .countWindow(1000000)
