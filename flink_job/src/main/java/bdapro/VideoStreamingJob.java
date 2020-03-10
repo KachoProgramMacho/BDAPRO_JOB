@@ -51,32 +51,22 @@ public class VideoStreamingJob {
         properties.setProperty("zookeeper.connect", "cloud-12:2181");
         properties.setProperty("group.id", "demoGROUPID");
         env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
-        env.setStateBackend(new RocksDBStateBackend("hdfs://cloud-11:44000/user/denis/flink/", true));
+        //enable/disable checkpointing
+        //env.setStateBackend(new RocksDBStateBackend("hdfs://cloud-11:44000/user/denis/flink/", true));
         env.getCheckpointConfig().setCheckpointInterval(60000);
         DataStream<String> stream = env.addSource(new FlinkKafkaConsumer011<>("demo", new SimpleStringSchema(), properties).setStartFromEarliest()).setParallelism(16);
 
-
-//        DataStream<String> videoEvents = env.socketTextStream("localhost", 7777, "\n");
-
-//        env.readTextFile("PATH_TO_FILE");
-
         stream.map(new InitialMapStringToEventTuple()).setParallelism(16)
-                .keyBy(1)
-                //video ID
-                .countWindow(1000000)
-                //.window(TumblingProcessingTimeWindows.of(Time.seconds(30)))
-                //timeWindow(Time.days(1))
+                .keyBy(1)//Advertisement ID
+                .countWindow(300000)
                 .process(new AvgProcessWindowFunction()).setParallelism(64)
                 .filter(new FilterFunction<Tuple5<Long, String, String, Float, Integer>>() {
                     @Override
                     public boolean filter(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
-                        return (a.f3/a.f4) > 0.05;
+                        return (a.f3/a.f4) > 0.05; //Remove ads with low engagement score
                     }
                 })
                 .setParallelism(64)
-//                .keyBy(2)
-//                //.window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
-//                .reduce(new CategoryReducer()).setParallelism(64)
                 .map(new MapFunction<Tuple5<Long, String, String, Float, Integer>, Tuple4<Long, String, Float,String>>() {
                     @Override
                     public Tuple4<Long, String, Float,String> map(Tuple5<Long, String, String, Float, Integer> a) throws Exception {
@@ -87,14 +77,9 @@ public class VideoStreamingJob {
                         return new Tuple4<>(System.currentTimeMillis()-a.f0, a.f2, a.f3/a.f4,d);
                     }
                 }).setParallelism(64)
-                .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
-                //.writeAsText("ABOUTBOYKO_FOREVER.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
-
-//        stream.writeAsText("SLIPKNOT.csv");
+                .writeAsText("file:////share/hadoop/rangelov/BigDataAnalysisProject/flink-1.6.0/experiment_results.txt", FileSystem.WriteMode.OVERWRITE).setParallelism(1);
         env.execute();
     }
-
-
 
     static class InitialMapStringToEventTuple implements MapFunction<String, Tuple5<Long, String, String, String, Float>> {
 
@@ -145,6 +130,7 @@ public class VideoStreamingJob {
 
     }
 
+    //Legacy code
     static class AdvertisementCategoryAggregator implements AggregateFunction<Tuple5<Long, String, String, String, Float>, CustomAcc, CustomAcc> {
          @Override
         public CustomAcc createAccumulator() {
@@ -180,6 +166,7 @@ public class VideoStreamingJob {
         }
     }
 
+    //Legacy code
     public static class CategoryTokenizer implements FlatMapFunction<CustomAcc,Tuple4<Long,String, Float, Integer>>{
 
         @Override
@@ -192,6 +179,7 @@ public class VideoStreamingJob {
         }
     }
 
+    //Legacy code
     public static class CategoryReducer implements ReduceFunction<Tuple5<Long, String, String, Float, Integer>>{
 
         @Override
